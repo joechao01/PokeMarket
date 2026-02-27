@@ -1193,6 +1193,22 @@
           <button class="btn btn-outline" onclick="showSection('scanner')">+ Add Cards</button>
         </div>
       </div>
+      <div id="collectionFilters" style="padding:10px 16px 4px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <span style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace;letter-spacing:1px;margin-right:4px">FILTER</span>
+        <div class="filter-chip active" id="fc-all" onclick="setCollectionFilter('all',this)">All</div>
+        <div style="width:1px;height:18px;background:var(--border);margin:0 2px"></div>
+        <div class="filter-chip" id="fc-holo" onclick="setCollectionFilter('holo',this)">Holo</div>
+        <div class="filter-chip" id="fc-firstEd" onclick="setCollectionFilter('firstEd',this)">1st Ed</div>
+        <div class="filter-chip" id="fc-shadowless" onclick="setCollectionFilter('shadowless',this)">Shadowless</div>
+        <div style="width:1px;height:18px;background:var(--border);margin:0 2px"></div>
+        <div class="filter-chip" id="fc-english" onclick="setCollectionFilter('english',this)">English</div>
+        <div class="filter-chip" id="fc-japanese" onclick="setCollectionFilter('japanese',this)">Japanese</div>
+        <div style="width:1px;height:18px;background:var(--border);margin:0 2px"></div>
+        <div class="filter-chip" id="fc-baseset" onclick="setCollectionFilter('baseset',this)">Base Set</div>
+        <div class="filter-chip" id="fc-jungle" onclick="setCollectionFilter('jungle',this)">Jungle</div>
+        <div class="filter-chip" id="fc-fossil" onclick="setCollectionFilter('fossil',this)">Fossil</div>
+        <span id="filterCount" style="margin-left:auto;font-size:11px;color:var(--muted);font-family:'Space Mono',monospace"></span>
+      </div>
       <div id="collectionGrid" class="cards-grid">
         <div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--muted)">
           <div style="font-size:40px;margin-bottom:12px">🃏</div>
@@ -1688,7 +1704,7 @@ const CARD_FALLBACKS = {
 
 
 
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v23';
 if(localStorage.getItem('pokemarket_version') !== APP_VERSION) {
   localStorage.removeItem('pokemarket_collection');
   localStorage.removeItem('pokemarket_img_cache');
@@ -2007,6 +2023,64 @@ function saveCollection() {
   localStorage.setItem('pokemarket_collection', JSON.stringify(collection));
 }
 
+// ============================================================
+// COLLECTION FILTERS
+// ============================================================
+let activeCollectionFilters = new Set(); // empty = show all
+
+function setCollectionFilter(filter, el) {
+  const allBtn = document.getElementById('fc-all');
+
+  if (filter === 'all') {
+    activeCollectionFilters.clear();
+    document.querySelectorAll('#collectionFilters .filter-chip').forEach(c => c.classList.remove('active'));
+    allBtn.classList.add('active');
+  } else {
+    // Toggle this filter
+    if (activeCollectionFilters.has(filter)) {
+      activeCollectionFilters.delete(filter);
+      el.classList.remove('active');
+    } else {
+      activeCollectionFilters.add(filter);
+      el.classList.add('active');
+    }
+    // All button active only when no filters set
+    if (activeCollectionFilters.size === 0) {
+      allBtn.classList.add('active');
+    } else {
+      allBtn.classList.remove('active');
+    }
+  }
+  updateCollectionView();
+}
+
+function getFilteredCollection() {
+  if (activeCollectionFilters.size === 0) return collection;
+  return collection.filter(card => {
+    for (const f of activeCollectionFilters) {
+      if (f === 'holo'       && card.rarity !== 'holo')                          return false;
+      if (f === 'firstEd'    && !card.firstEd)                                   return false;
+      if (f === 'shadowless' && !card.shadowless)                                 return false;
+      if (f === 'english'    && (card.language||'English').toLowerCase() !== 'english') return false;
+      if (f === 'japanese'   && (card.language||'').toLowerCase() !== 'japanese') return false;
+      if (f === 'baseset'    && !card.set.toLowerCase().includes('base set'))    return false;
+      if (f === 'jungle'     && card.set.toLowerCase() !== 'jungle')             return false;
+      if (f === 'fossil'     && card.set.toLowerCase() !== 'fossil')             return false;
+    }
+    return true;
+  });
+}
+
+function updateFilterCount(filtered, total) {
+  const el = document.getElementById('filterCount');
+  if (!el) return;
+  const physFiltered = filtered.reduce((s,c) => s + (c.qty||1), 0);
+  const physTotal    = total.reduce((s,c) => s + (c.qty||1), 0);
+  el.textContent = activeCollectionFilters.size > 0
+    ? `${physFiltered} of ${physTotal} cards`
+    : '';
+}
+
 function updateCollectionView() {
   const grid = document.getElementById('collectionGrid');
   // For qty cards, sum all prices (e.g. Victreebel has prices:[32,24])
@@ -2041,11 +2115,12 @@ function updateCollectionView() {
 
   if(collectionViewMode === 'list') {
     grid.style.display = 'block';
-    grid.innerHTML = buildCompactList();
+    grid.innerHTML = buildCompactList(getFilteredCollection());
   } else {
     grid.style.display = '';
-    grid.innerHTML = collection.map(c => buildCardItem(c)).join('');
+    grid.innerHTML = getFilteredCollection().map(c => buildCardItem(c)).join('');
   }
+  updateFilterCount(getFilteredCollection(), collection);
 }
 
 
@@ -2533,9 +2608,10 @@ function setCollectionView(mode) {
   updateCollectionView();
 }
 
-function buildCompactList() {
-  if(collection.length===0) return '<div style="text-align:center;padding:40px;color:var(--muted)">No cards yet.</div>';
-  const sorted = getSortedCollection();
+function buildCompactList(cards) {
+  const src = cards || collection;
+  if(src.length===0) return '<div style="text-align:center;padding:40px;color:var(--muted)">No cards match the current filter.</div>';
+  const sorted = getSortedCollection(src);
   let footRaw=0,footPsa8=0,footPsa9=0,footPsa10=0;
   const rows = sorted.map(c => {
     const unitPrice=c.price||0, qty=c.qty||1;
@@ -2895,9 +2971,10 @@ function sortCompact(col) {
   }, 10);
 }
 
-function getSortedCollection() {
-  if(!compactSortCol) return collection;
-  return [...collection].sort((a,b) => {
+function getSortedCollection(cards) {
+  const src = cards || collection;
+  if(!compactSortCol) return src;
+  return [...src].sort((a,b) => {
     const rawA = a.prices ? a.prices.reduce((s,x)=>s+x,0) : (a.price||0)*(a.qty||1);
     const rawB = b.prices ? b.prices.reduce((s,x)=>s+x,0) : (b.price||0)*(b.qty||1);
     let av, bv;
